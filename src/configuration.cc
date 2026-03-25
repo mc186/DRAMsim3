@@ -22,6 +22,7 @@ Config::Config(std::string config_file, std::string out_dir)
     CalculateSize();
     SetAddressMapping();
     InitTimingParams();
+    InitHybridBondingParams();  // Must be before InitPowerParams
     InitPowerParams();
     InitOtherParams();
 #ifdef THERMAL
@@ -68,7 +69,8 @@ DRAMProtocol Config::GetDRAMProtocol(std::string protocol_str) {
         {"GDDR5", DRAMProtocol::GDDR5},   {"GDDR5X", DRAMProtocol::GDDR5X},  {"GDDR6", DRAMProtocol::GDDR6},
         {"LPDDR", DRAMProtocol::LPDDR},   {"LPDDR3", DRAMProtocol::LPDDR3},
         {"LPDDR4", DRAMProtocol::LPDDR4}, {"HBM", DRAMProtocol::HBM},
-        {"HBM2", DRAMProtocol::HBM2},     {"HMC", DRAMProtocol::HMC}};
+        {"HBM2", DRAMProtocol::HBM2},     {"HBM_HYBRID", DRAMProtocol::HBM_HYBRID},
+        {"HMC", DRAMProtocol::HMC}};
 
     if (protocol_pairs.find(protocol_str) == protocol_pairs.end()) {
         std::cout << "Unkwown/Unsupported DRAM Protocol: " << protocol_str
@@ -106,7 +108,7 @@ void Config::InitDRAMParams() {
     // HBM specific parameters
     enable_hbm_dual_cmd =
         reader.GetBoolean("dram_structure", "hbm_dual_cmd", true);
-    enable_hbm_dual_cmd &= IsHBM();  // Make sure only HBM enables this
+    enable_hbm_dual_cmd &= IsAnyHBM();  // Make sure only HBM/HBM_HYBRID enables this
     // HMC specific parameters
     num_links = GetInteger("hmc", "num_links", 4);
     link_width = GetInteger("hmc", "link_width", 16);
@@ -133,7 +135,7 @@ void Config::InitDRAMParams() {
         BL = (BL == 0 ) ? 8 : BL;
     } else {
         burst_cycle = (BL == 0) ? 0 : BL / 2;
-        BL = (BL == 0) ? (IsHBM() ? 4 : 8) : BL;
+        BL = (BL == 0) ? (IsAnyHBM() ? 4 : 8) : BL;
     }
     // every protocol has a different definition of "column",
     // in DDR3/4, each column is exactly device_width bits,
@@ -145,7 +147,7 @@ void Config::InitDRAMParams() {
     // to only represent physical column (device width)
     if (IsGDDR()) {
         columns *= BL;
-    } else if (IsHBM()) {
+    } else if (IsAnyHBM()) {
         columns *= 2;
     }
     return;
@@ -195,15 +197,64 @@ void Config::InitPowerParams() {
     double IDD5PB = reader.GetReal("power", "IDD5PB", 5);    // per-bank ref
     double IDD6x = reader.GetReal("power", "IDD6x", 31);
 
-    // energy increments per command/cycle, calculated as voltage * current *
-    // time(in cycles) units are V * mA * Cycles and if we convert cycles to ns
-    // then it's exactly pJ in energy and because a command take effects on all
-    // devices per rank, also multiply that number
     double devices = static_cast<double>(devices_per_rank);
-    act_energy_inc =
-        VDD * (IDD0 * tRC - (IDD3N * tRAS + IDD2N * tRP)) * devices;
-    read_energy_inc = VDD * (IDD4R - IDD3N) * burst_cycle * devices;
-    write_energy_inc = VDD * (IDD4W - IDD3N) * burst_cycle * devices;
+    int bits_per_access = bus_width * BL;  // Total bits transferred per access
+
+    if (use_hybrid_bonding) {
+        // DECOMPOSED ENERGY MODEL for hybrid bonding
+        // Reference: NVIDIA HPCA 2017, Springer Cu-Cu review 2025
+
+        // Core energy from IDD (unchanged by bonding technology)
+        // This represents the DRAM array access energy
+        act_energy_inc =
+            VDD * (IDD0 * tRC - (IDD3N * tRAS + IDD2N * tRP)) * devices;
+
+        // I/O + TSV energy per access (significantly reduced for hybrid bonding)
+        // No SerDes energy for hybrid bonding (direct Cu-Cu connection)
+        double read_io_total = (io_energy_per_bit_pJ + tsv_energy_per_bit_pJ)
+                               * bits_per_access;
+        double write_io_total = (io_energy_per_bit_pJ + tsv_energy_per_bit_pJ)
+                                * bits_per_access;
+
+        // Core component from IDD4R/IDD4W
+        // In traditional HBM, I/O is ~40% of IDD4R/IDD4W. For hybrid bonding,
+        // we extract the core portion and replace I/O with our decomposed model.
+        // Conservative estimate: core is ~60% of traditional IDD-based energy
+        double core_fraction = 0.6;
+        double read_core = VDD * (IDD4R * core_fraction - IDD3N)
+                           * burst_cycle * devices;
+        double write_core = VDD * (IDD4W * core_fraction - IDD3N)
+                            * burst_cycle * devices;
+
+        // Total read/write energy is core + I/O
+        read_energy_inc = read_core + read_io_total;
+        write_energy_inc = write_core + write_io_total;
+
+        // Store component breakdown for statistics
+        read_core_energy_inc = read_core;
+        read_io_energy_inc = read_io_total;
+        write_core_energy_inc = write_core;
+        write_io_energy_inc = write_io_total;
+
+    } else {
+        // LEGACY IDD-BASED MODEL (unchanged for non-hybrid HBM)
+        // energy increments per command/cycle, calculated as voltage * current *
+        // time(in cycles) units are V * mA * Cycles and if we convert cycles to ns
+        // then it's exactly pJ in energy and because a command take effects on all
+        // devices per rank, also multiply that number
+        act_energy_inc =
+            VDD * (IDD0 * tRC - (IDD3N * tRAS + IDD2N * tRP)) * devices;
+        read_energy_inc = VDD * (IDD4R - IDD3N) * burst_cycle * devices;
+        write_energy_inc = VDD * (IDD4W - IDD3N) * burst_cycle * devices;
+
+        // No decomposition available for legacy model
+        read_core_energy_inc = read_energy_inc;
+        read_io_energy_inc = 0.0;
+        write_core_energy_inc = write_energy_inc;
+        write_io_energy_inc = 0.0;
+    }
+
+    // Refresh and standby energy (same for both models)
     ref_energy_inc = VDD * (IDD5AB - IDD3N) * tRFC * devices;
     refb_energy_inc = VDD * (IDD5PB - IDD3N) * tRFCb * devices;
     // the following are added per cycle
@@ -341,6 +392,74 @@ void Config::InitTimingParams() {
     WL = AL + CWL;
     read_delay = RL + burst_cycle;
     write_delay = WL + burst_cycle;
+    return;
+}
+
+void Config::InitHybridBondingParams() {
+    const auto& reader = *reader_;
+
+    // Check if hybrid bonding section exists or if using HBM_HYBRID protocol
+    use_hybrid_bonding = reader.GetBoolean("hybrid_bonding",
+                                           "use_hybrid_bonding", false);
+
+    if (use_hybrid_bonding || IsHBMHybrid()) {
+        use_hybrid_bonding = true;  // Ensure flag is set for HBM_HYBRID protocol
+
+        // Physical TSV/bond parameters
+        tsv_count_per_channel = GetInteger("hybrid_bonding",
+                                           "tsv_count_per_channel", 2048);
+        tsv_capacitance_fF = reader.GetReal("hybrid_bonding",
+                                            "tsv_capacitance_fF", 10.0);
+        tsv_resistance_mOhm = reader.GetReal("hybrid_bonding",
+                                             "tsv_resistance_mOhm", 5.0);
+        bond_pitch_um = reader.GetReal("hybrid_bonding",
+                                       "bond_pitch_um", 6.0);
+        io_latency_cycles = GetInteger("hybrid_bonding",
+                                       "io_latency_cycles", 2);
+
+        // Energy decomposition parameters (pJ per bit)
+        core_read_energy_pJ = reader.GetReal("energy_decomposition",
+                                             "core_read_energy_pJ_per_bit", 3.0);
+        core_write_energy_pJ = reader.GetReal("energy_decomposition",
+                                              "core_write_energy_pJ_per_bit", 3.5);
+        io_energy_per_bit_pJ = reader.GetReal("energy_decomposition",
+                                              "io_energy_per_bit_pJ", 0.5);
+        tsv_energy_per_bit_pJ = reader.GetReal("energy_decomposition",
+                                               "tsv_energy_per_bit_pJ", 0.3);
+        serdes_energy_per_bit_pJ = reader.GetReal("energy_decomposition",
+                                                  "serdes_energy_per_bit_pJ", 0.0);
+
+        // Thermal parameters for hybrid bonding
+        bond_thermal_resistance = reader.GetReal("thermal",
+                                                 "bond_thermal_resistance", 0.5);
+        die_thickness_um = reader.GetReal("thermal",
+                                          "die_thickness_um", 30.0);
+    } else {
+        // Default values for non-hybrid (microbump) HBM
+        use_hybrid_bonding = false;
+        tsv_count_per_channel = 512;
+        tsv_capacitance_fF = 75.0;
+        tsv_resistance_mOhm = 35.0;
+        bond_pitch_um = 45.0;
+        io_latency_cycles = 8;
+
+        // Default microbump energy parameters
+        core_read_energy_pJ = 3.0;
+        core_write_energy_pJ = 3.5;
+        io_energy_per_bit_pJ = 2.0;
+        tsv_energy_per_bit_pJ = 1.0;
+        serdes_energy_per_bit_pJ = 1.5;
+
+        // Default thermal parameters
+        bond_thermal_resistance = 1.0;
+        die_thickness_um = 50.0;
+    }
+
+    // Initialize energy decomposition tracking to zero (will be set in InitPowerParams)
+    read_core_energy_inc = 0.0;
+    read_io_energy_inc = 0.0;
+    write_core_energy_inc = 0.0;
+    write_io_energy_inc = 0.0;
     return;
 }
 

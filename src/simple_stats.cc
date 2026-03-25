@@ -45,6 +45,12 @@ SimpleStats::SimpleStats(const Config& config, int channel_id)
     InitStat("ref_energy", "double", "Refresh energy");
     InitStat("refb_energy", "double", "Refresh-bank energy");
 
+    // Hybrid bonding energy decomposition stats
+    InitStat("read_core_energy", "double", "Read core array energy (pJ)");
+    InitStat("read_io_energy", "double", "Read I/O + TSV energy (pJ)");
+    InitStat("write_core_energy", "double", "Write core array energy (pJ)");
+    InitStat("write_io_energy", "double", "Write I/O + TSV energy (pJ)");
+
     // Vector counter stats
     InitVecStat("all_bank_idle_cycles", "vec_counter",
                 "Cyles of all bank idle in rank", "rank", config_.ranks);
@@ -376,6 +382,16 @@ void SimpleStats::UpdateEpochStats() {
     doubles_["refb_energy"] =
         epoch_counters_["num_refb_cmds"] * config_.refb_energy_inc;
 
+    // Hybrid bonding energy decomposition
+    doubles_["read_core_energy"] =
+        epoch_counters_["num_read_cmds"] * config_.read_core_energy_inc;
+    doubles_["read_io_energy"] =
+        epoch_counters_["num_read_cmds"] * config_.read_io_energy_inc;
+    doubles_["write_core_energy"] =
+        epoch_counters_["num_write_cmds"] * config_.write_core_energy_inc;
+    doubles_["write_io_energy"] =
+        epoch_counters_["num_write_cmds"] * config_.write_io_energy_inc;
+
     // vector doubles, update first, then push
     double background_energy = 0.0;
     for (int i = 0; i < config_.ranks; i++) {
@@ -435,6 +451,16 @@ void SimpleStats::UpdateFinalStats() {
     doubles_["ref_energy"] = counters_["num_ref_cmds"] * config_.ref_energy_inc;
     doubles_["refb_energy"] =
         counters_["num_refb_cmds"] * config_.refb_energy_inc;
+
+    // Hybrid bonding energy decomposition
+    doubles_["read_core_energy"] =
+        counters_["num_read_cmds"] * config_.read_core_energy_inc;
+    doubles_["read_io_energy"] =
+        counters_["num_read_cmds"] * config_.read_io_energy_inc;
+    doubles_["write_core_energy"] =
+        counters_["num_write_cmds"] * config_.write_core_energy_inc;
+    doubles_["write_io_energy"] =
+        counters_["num_write_cmds"] * config_.write_io_energy_inc;
 
     // vector doubles, update first, then push
     double background_energy = 0.0;

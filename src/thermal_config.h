@@ -27,4 +27,14 @@ const double Hcu = 5e-6;     // Copper
 const double Hin = 20e-6;    // Insulator
 const double Hhs = 1000e-6;  // Heat sink
 
+/* Hybrid bonding parameters */
+// Cu-Cu hybrid bond has ~20% better thermal conductivity than solder/MR-MUF
+// Reference: MDPI Electronics 2025 thermal review
+const double Kcu_hybrid = 401.0 * 1.2;  // Enhanced Cu conductivity for hybrid bond
+const double Hsi_hybrid = 30e-6;        // Thinner die for hybrid bonding (30um vs 50um)
+const double Hin_hybrid = 2e-6;         // Thinner bond interface for hybrid (2um vs 20um)
+
+// Maximum supported die layers for thermal simulation
+const int MAX_DIE_LAYERS = 20;
+
 #endif

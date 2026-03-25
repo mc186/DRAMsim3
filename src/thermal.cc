@@ -47,8 +47,8 @@ ThermalCalculator::ThermalCalculator(const Config &config)
         dimY = vault_y * bank_y * config_.num_y_grids;
 
         num_case = 1;
-    } else if (config_.IsHBM()) {
-        numP = config_.num_dies + 1;  // add logic layer for HBM
+    } else if (config_.IsAnyHBM()) {
+        numP = config_.num_dies + 1;  // add logic layer for HBM/HBM_HYBRID
         bank_x = 8;
         bank_y = 2;
         vault_x = 1;
@@ -248,7 +248,7 @@ std::pair<int, int> ThermalCalculator::MapToVault(int channel_id) {
         if (config_.bank_order == 0) {
             std::swap(vault_id_x, vault_id_y);
         }
-    } else if (config_.IsHBM()) {
+    } else if (config_.IsAnyHBM()) {
         vault_id_y = channel_id % 2;
         vault_id_x = 0;
     }
@@ -271,7 +271,7 @@ std::pair<int, int> ThermalCalculator::MapToBank(int bankgroup_id,
         if (config_.bank_order == 0) {
             std::swap(bank_id_x, bank_id_y);
         }
-    } else if (config_.IsHBM()) {
+    } else if (config_.IsAnyHBM()) {
         bank_id_x = bankgroup_id * 2 + bank_id / 2;
         bank_id_y = bank_id % 2;
     } else {
@@ -307,7 +307,7 @@ int ThermalCalculator::MapToZ(int channel_id, int bank_id) {
             z = bank_id / num_bank_per_layer;
         else
             z = numP - bank_id / num_bank_per_layer - 2;
-    } else if (config_.IsHBM()) {
+    } else if (config_.IsAnyHBM()) {
         z = channel_id / 2;
     } else {
         z = 0;
@@ -451,7 +451,7 @@ void ThermalCalculator::UpdateCMDPower(const int channel, const Command &cmd,
     // int channel = cmd.Channel();
     int case_id;
     double device_scale;
-    if (config_.IsHMC() || config_.IsHBM()) {
+    if (config_.IsHMC() || config_.IsAnyHBM()) {
         device_scale = 1;
         case_id = 0;
     } else {
@@ -522,7 +522,7 @@ void ThermalCalculator::UpdateBackgroundEnergy(const int channel,
 }
 
 void ThermalCalculator::UpdateEpoch(uint64_t clk) {
-    if (config_.IsHBM() || config_.IsHMC()) {
+    if (config_.IsAnyHBM() || config_.IsHMC()) {
         double bg_energy = 0;
         for (const auto &vec_rank_energy : background_energy_) {
             for (const auto &rank_energy : vec_rank_energy) {
@@ -582,7 +582,7 @@ void ThermalCalculator::PrintTransPT(uint64_t clk) {
 }
 
 void ThermalCalculator::PrintFinalPT(uint64_t clk) {
-    if (config_.IsHBM() || config_.IsHMC()) {
+    if (config_.IsAnyHBM() || config_.IsHMC()) {
         double bg_energy = 0;
         for (const auto &vec_rank_energy : background_energy_) {
             for (const auto &rank_energy : vec_rank_energy) {

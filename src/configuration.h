@@ -20,6 +20,7 @@ enum class DRAMProtocol {
     LPDDR4,
     HBM,
     HBM2,
+    HBM_HYBRID,  // Hybrid bonded HBM (HBM3+/HBM4 with Cu-Cu bonds)
     HMC,
     SIZE
 };
@@ -120,6 +121,31 @@ class Config {
     int block_size;  // block size in bytes
     int xbar_queue_depth;
 
+    // Hybrid bonding parameters
+    bool use_hybrid_bonding;          // Enable hybrid bonding model
+    int tsv_count_per_channel;        // Physical TSV count (for bandwidth calc)
+    double tsv_capacitance_fF;        // TSV capacitance in fF
+    double tsv_resistance_mOhm;       // TSV resistance in mOhm
+    double bond_pitch_um;             // Bond pitch in micrometers
+    int io_latency_cycles;            // Explicit I/O path latency
+
+    // Decomposed energy parameters (pJ)
+    double core_read_energy_pJ;       // DRAM core read energy per bit
+    double core_write_energy_pJ;      // DRAM core write energy per bit
+    double io_energy_per_bit_pJ;      // I/O driver energy per bit
+    double tsv_energy_per_bit_pJ;     // TSV switching energy per bit
+    double serdes_energy_per_bit_pJ;  // SerDes energy (0 for hybrid)
+
+    // Energy decomposition tracking (for statistics)
+    double read_core_energy_inc;      // Read core energy increment
+    double read_io_energy_inc;        // Read I/O + TSV energy increment
+    double write_core_energy_inc;     // Write core energy increment
+    double write_io_energy_inc;       // Write I/O + TSV energy increment
+
+    // Thermal parameters for hybrid bonding
+    double bond_thermal_resistance;   // Thermal resistance of Cu-Cu bond layer
+    double die_thickness_um;          // Individual die thickness
+
     // System
     std::string address_mapping;
     std::string queue_structure;
@@ -154,6 +180,12 @@ class Config {
     bool IsHBM() const {
         return (protocol == DRAMProtocol::HBM ||
                 protocol == DRAMProtocol::HBM2);
+    }
+    bool IsHBMHybrid() const {
+        return (protocol == DRAMProtocol::HBM_HYBRID);
+    }
+    bool IsAnyHBM() const {
+        return IsHBM() || IsHBMHybrid();
     }
     bool IsHMC() const { return (protocol == DRAMProtocol::HMC); }
     // yzy: add another function
@@ -192,6 +224,7 @@ class Config {
     void InitOtherParams();
     void InitPowerParams();
     void InitSystemParams();
+    void InitHybridBondingParams();
 #ifdef THERMAL
     void InitThermalParams();
 #endif  // THERMAL
