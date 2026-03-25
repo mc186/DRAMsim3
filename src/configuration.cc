@@ -202,31 +202,38 @@ void Config::InitPowerParams() {
 
     if (use_hybrid_bonding) {
         // DECOMPOSED ENERGY MODEL for hybrid bonding
-        // Reference: NVIDIA HPCA 2017, Springer Cu-Cu review 2025
+        // Reference: NVIDIA HPCA 2017 (HBM energy breakdown)
+        // Reference: MDPI Electronics 2025 (hybrid bonding thermal/electrical)
+        // Reference: Springer Nature 2025 (Cu-Cu bonding characteristics)
+        //
+        // HBM uses wide PARALLEL TSV interface (NOT SerDes like GDDR/HMC)
+        // Energy savings from hybrid bonding come from:
+        //   1. Lower TSV capacitance (10 fF vs 75 fF) -> reduced switching energy
+        //   2. Lower resistance (<10 mOhm vs 20-50 mOhm) -> reduced I^2R losses
+        //   3. Shorter interconnect paths -> reduced wire energy
 
-        // Core energy from IDD (unchanged by bonding technology)
-        // This represents the DRAM array access energy
+        // Activation energy from IDD (unchanged by bonding technology)
         act_energy_inc =
             VDD * (IDD0 * tRC - (IDD3N * tRAS + IDD2N * tRP)) * devices;
 
-        // I/O + TSV energy per access (significantly reduced for hybrid bonding)
-        // No SerDes energy for hybrid bonding (direct Cu-Cu connection)
-        double read_io_total = (io_energy_per_bit_pJ + tsv_energy_per_bit_pJ)
-                               * bits_per_access;
-        double write_io_total = (io_energy_per_bit_pJ + tsv_energy_per_bit_pJ)
-                                * bits_per_access;
+        // I/O path energy per access (I/O driver + TSV + internal wiring)
+        // Hybrid bonding reduces TSV capacitance by ~85% (10fF vs 75fF)
+        // This directly reduces CV^2 switching energy
+        double read_io_total = (io_energy_per_bit_pJ + tsv_energy_per_bit_pJ
+                               + wire_energy_per_bit_pJ) * bits_per_access;
+        double write_io_total = (io_energy_per_bit_pJ + tsv_energy_per_bit_pJ
+                                + wire_energy_per_bit_pJ) * bits_per_access;
 
-        // Core component from IDD4R/IDD4W
-        // In traditional HBM, I/O is ~40% of IDD4R/IDD4W. For hybrid bonding,
-        // we extract the core portion and replace I/O with our decomposed model.
-        // Conservative estimate: core is ~60% of traditional IDD-based energy
-        double core_fraction = 0.6;
+        // Core component from IDD4R/IDD4W (row + column array access)
+        // In traditional HBM, I/O is ~40% of IDD4R/IDD4W energy.
+        // For hybrid bonding, we use decomposed model for I/O portion.
+        double core_fraction = 0.6;  // Core is ~60% of total read/write current
         double read_core = VDD * (IDD4R * core_fraction - IDD3N)
                            * burst_cycle * devices;
         double write_core = VDD * (IDD4W * core_fraction - IDD3N)
                             * burst_cycle * devices;
 
-        // Total read/write energy is core + I/O
+        // Total read/write energy = core array + I/O path
         read_energy_inc = read_core + read_io_total;
         write_energy_inc = write_core + write_io_total;
 
@@ -418,6 +425,9 @@ void Config::InitHybridBondingParams() {
                                        "io_latency_cycles", 2);
 
         // Energy decomposition parameters (pJ per bit)
+        // Based on NVIDIA HPCA 2017: HBM column energy = 1.5-5.7 pJ/bit
+        // HBM uses wide parallel TSV interface (NOT SerDes)
+        // Energy savings from hybrid bonding: lower TSV capacitance, shorter paths
         core_read_energy_pJ = reader.GetReal("energy_decomposition",
                                              "core_read_energy_pJ_per_bit", 3.0);
         core_write_energy_pJ = reader.GetReal("energy_decomposition",
@@ -426,8 +436,8 @@ void Config::InitHybridBondingParams() {
                                               "io_energy_per_bit_pJ", 0.5);
         tsv_energy_per_bit_pJ = reader.GetReal("energy_decomposition",
                                                "tsv_energy_per_bit_pJ", 0.3);
-        serdes_energy_per_bit_pJ = reader.GetReal("energy_decomposition",
-                                                  "serdes_energy_per_bit_pJ", 0.0);
+        wire_energy_per_bit_pJ = reader.GetReal("energy_decomposition",
+                                                "wire_energy_per_bit_pJ", 0.1);
 
         // Thermal parameters for hybrid bonding
         bond_thermal_resistance = reader.GetReal("thermal",
@@ -436,19 +446,21 @@ void Config::InitHybridBondingParams() {
                                           "die_thickness_um", 30.0);
     } else {
         // Default values for non-hybrid (microbump) HBM
+        // Reference: NVIDIA HPCA 2017, Stanford DramDSE
         use_hybrid_bonding = false;
         tsv_count_per_channel = 512;
-        tsv_capacitance_fF = 75.0;
-        tsv_resistance_mOhm = 35.0;
-        bond_pitch_um = 45.0;
+        tsv_capacitance_fF = 75.0;      // Higher capacitance with microbump
+        tsv_resistance_mOhm = 35.0;     // Higher resistance (20-50 mOhm typical)
+        bond_pitch_um = 45.0;           // 40-55 um typical for microbump
         io_latency_cycles = 8;
 
-        // Default microbump energy parameters
-        core_read_energy_pJ = 3.0;
+        // Default microbump energy parameters (pJ per bit)
+        // Based on NVIDIA HPCA 2017: column energy 1.5-5.7 pJ/bit for HBM
+        core_read_energy_pJ = 3.0;      // Row + column array energy
         core_write_energy_pJ = 3.5;
-        io_energy_per_bit_pJ = 2.0;
-        tsv_energy_per_bit_pJ = 1.0;
-        serdes_energy_per_bit_pJ = 1.5;
+        io_energy_per_bit_pJ = 2.0;     // I/O driver + termination
+        tsv_energy_per_bit_pJ = 1.0;    // TSV switching (higher C)
+        wire_energy_per_bit_pJ = 0.5;   // Internal bus toggle energy
 
         // Default thermal parameters
         bond_thermal_resistance = 1.0;

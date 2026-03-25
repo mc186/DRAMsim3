@@ -129,12 +129,14 @@ class Config {
     double bond_pitch_um;             // Bond pitch in micrometers
     int io_latency_cycles;            // Explicit I/O path latency
 
-    // Decomposed energy parameters (pJ)
-    double core_read_energy_pJ;       // DRAM core read energy per bit
-    double core_write_energy_pJ;      // DRAM core write energy per bit
-    double io_energy_per_bit_pJ;      // I/O driver energy per bit
-    double tsv_energy_per_bit_pJ;     // TSV switching energy per bit
-    double serdes_energy_per_bit_pJ;  // SerDes energy (0 for hybrid)
+    // Decomposed energy parameters (pJ per bit)
+    // Based on NVIDIA HPCA 2017: row energy + column energy + I/O energy
+    // HBM uses wide parallel TSV interface (not SerDes)
+    double core_read_energy_pJ;       // DRAM core (row + column) read energy
+    double core_write_energy_pJ;      // DRAM core (row + column) write energy
+    double io_energy_per_bit_pJ;      // I/O driver + termination energy
+    double tsv_energy_per_bit_pJ;     // TSV switching energy (reduced capacitance for hybrid)
+    double wire_energy_per_bit_pJ;    // Data bus toggle energy (internal wiring)
 
     // Energy decomposition tracking (for statistics)
     double read_core_energy_inc;      // Read core energy increment
